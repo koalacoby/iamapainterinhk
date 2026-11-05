@@ -373,7 +373,6 @@ function startGameTimer() {
     if (left <= 0) {
       clearInterval(timerInterval);
       if (isHost) {
-         // Auto submit on time out for drawers
          if (lastRoomState.currentRound.phase === "drawing") {
             lastRoomState.currentRound.phase = "guess";
             roomChannel.send({ type: 'broadcast', event: 'room_state', payload: lastRoomState });
