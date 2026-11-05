@@ -76,7 +76,6 @@
   .lobby-list { margin: 12px 0; font-size: 1.1rem; }
   .lobby-list div { padding: 4px 0; }
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #2ed573; margin-right: 8px; }
-  .dot.off { background: #b2bec3; }
 </style>
 </head>
 <body>
@@ -156,30 +155,14 @@
 </div>
 
 <script type="module">
-/* ============================================================
-   1. FIREBASE SETUP
-   ============================================================ */
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, get, update, onValue, remove, onDisconnect, push, child }
-  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-// REPLACE THESE WITH YOUR ACTUAL FIREBASE CONFIG
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+// YOUR SUPABASE SETTINGS
+const SUPABASE_URL = "https://iamapainterinhk.supabase.co";
+const SUPABASE_KEY = "sb_publishable_bvqxvM8xffJbyD0B2zF3kg_vIxQiM0f";
 
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/* ============================================================
-   2. GAME CONTENT
-   ============================================================ */
 const wordSets = {
   "香港歌手": ["張學友", "劉德華", "黎明", "郭富城", "鄧麗君", "梅艷芳", "陳奕迅", "楊千嬅", "容祖兒", "古巨基", "衛蘭", "林家謙", "張敬軒", "周杰倫", "林俊傑", "鄧紫棋"],
   "香港交通": ["叮叮", "天星小輪", "巴士", "小巴", "港鐵", "的士", "電車", "渡輪", "機場巴士", "纜車"],
@@ -196,160 +179,127 @@ const colors = [
   "#e84393", "#00cec9", "#fd79a8", "#6c5ce7", "#ffffff"
 ];
 
-/* ============================================================
-   3. STATE
-   ============================================================ */
-let roomId = null;
-let myId = null;
+let myId = Math.random().toString(36).slice(2, 10);
 let myName = "";
 let isHost = false;
-let roomRef = null;
-let unsubRoom = null;
-let unsubDraw = null;
-
+let roomCodeStr = null;
+let roomChannel = null;
+let lastRoomState = null;
 let selectedTime = 30;
 let brushColor = "#5d4b6e";
 let brushSize = 12;
 let painting = false;
 let drawingSubmittedLocal = false;
-
 let currentRoundData = null;
-let drawnRoundKey = "";
-let lastRenderedKey = "";
-
+let lastX = 0;
+let lastY = 0;
+let timerInterval = null;
 const totalRounds = 5;
 
-/* ============================================================
-   4. HELPERS
-   ============================================================ */
-function uid() { return Math.random().toString(36).slice(2, 10); }
-function roomCode() {
+function roomCodeGen() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let s = "";
   for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
   return s;
 }
-function shareUrl(code) {
-  const base = location.origin + location.pathname;
-  return `${base}?room=${code}`;
-}
+function shareUrl(code) { return location.origin + location.pathname + "?room=" + code; }
 function show(screenId) {
   ["homeScreen", "lobbyScreen", "gameScreen", "finalScreen"].forEach(id => {
     document.getElementById(id).classList.toggle("hidden", id !== screenId);
   });
 }
-function toast(msg, el = "homeMsg") {
-  const e = document.getElementById(el);
-  if (e) e.textContent = msg;
+function escapeHtml(str) {
+  if (!str) return "";
+  return String(str).replace(/[&<>"']/g, function(m) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
+  });
 }
+function toast(msg) { document.getElementById("homeMsg").textContent = msg; }
+function getNickname() { return document.getElementById("nicknameInput").value.trim() || "玩家"; }
 
-/* ============================================================
-   5. HOME / CREATE / JOIN
-   ============================================================ */
-myId = uid();
-
-function getNickname() {
-  const v = document.getElementById("nicknameInput").value.trim();
-  return v || "玩家";
-}
-
-window.createRoom = async function () {
+window.createRoom = function() {
   myName = getNickname();
-  const code = roomCode();
-  const room = {
-    host: myId,
-    createdAt: Date.now(),
-    status: "lobby",
-    selectedTime: selectedTime,
-    players: { [myId]: { name: myName, host: true, online: true } },
-    scores: { [myId]: 0 },
-    currentRound: null
+  const code = roomCodeGen();
+  lastRoomState = {
+    host: myId, status: "lobby", selectedTime: selectedTime,
+    players: { [myId]: { name: myName, host: true } },
+    scores: { [myId]: 0 }, currentRound: null
   };
-  try {
-    await set(ref(db, "rooms/" + code), room);
-    enterRoom(code, true);
-  } catch (e) {
-    toast("建立房間失敗：" + e.message);
-  }
+  
+  roomChannel = supabase.channel(`room:${code}`);
+  roomChannel.subscribe(async (status) => {
+    if (status === 'SUBSCRIBED') {
+      await roomChannel.send({ type: 'broadcast', event: 'room_state', payload: lastRoomState });
+      setupRoomListeners(code, true);
+    }
+  });
 };
 
-window.joinRoom = async function () {
+window.joinRoom = function() {
   const code = (document.getElementById("joinCodeInput").value || "").trim().toUpperCase();
   if (code.length < 4) return toast("請輸入正確房間代碼");
   myName = getNickname();
-  try {
-    const snap = await get(ref(db, "rooms/" + code));
-    if (!snap.exists()) return toast("房間唔存在");
-    const r = snap.val();
-    if (r.status !== "lobby") return toast("遊戲已經開始，無法加入");
-    const playerCount = Object.keys(r.players || {}).length;
-    if (playerCount >= 8) return toast("房間已滿");
-    await update(ref(db, `rooms/${code}/players/${myId}`), { name: myName, host: false, online: true });
-    await update(ref(db, `rooms/${code}/scores/${myId}`), 0);
-    enterRoom(code, false);
-  } catch (e) {
-    toast("加入失敗：" + e.message);
-  }
+  
+  roomChannel = supabase.channel(`room:${code}`);
+  let joined = false;
+  
+  roomChannel.on('broadcast', { event: 'room_state' }, (payload) => {
+    if (!joined) {
+      const room = payload.payload;
+      if (room.status !== "lobby") { toast("遊戲已經開始"); return; }
+      room.players[myId] = { name: myName, host: false };
+      room.scores[myId] = 0;
+      roomChannel.send({ type: 'broadcast', event: 'room_state', payload: room });
+      setupRoomListeners(code, false);
+      joined = true;
+    }
+  });
+  
+  roomChannel.subscribe((status) => {
+    if (status === 'SUBSCRIBED' && !joined) {
+      roomChannel.send({ type: 'broadcast', event: 'request_state', payload: { from: myId, name: myName } });
+    }
+  });
+  
+  roomChannel.on('broadcast', { event: 'request_state' }, (payload) => {
+    if (isHost && lastRoomState) {
+      roomChannel.send({ type: 'broadcast', event: 'room_state', payload: lastRoomState });
+    }
+  });
 };
 
-window.addEventListener("DOMContentLoaded", () => {
-  const params = new URLSearchParams(location.search);
-  const pre = params.get("room");
-  if (pre) {
-    document.getElementById("joinCodeInput").value = pre.toUpperCase();
-    show("homeScreen");
-  }
-});
-
-/* ============================================================
-   6. ROOM SUBSCRIPTION
-   ============================================================ */
-function enterRoom(code, host) {
-  roomId = code;
+function setupRoomListeners(code, host) {
+  roomCodeStr = code;
   isHost = host;
-  roomRef = ref(db, "rooms/" + code);
-
-  const meRef = ref(db, `rooms/${code}/players/${myId}/online`);
-  set(meRef, true);
-  onDisconnect(meRef).set(false);
-
   history.replaceState(null, "", "?room=" + code);
-
-  if (unsubRoom) unsubRoom();
-  unsubRoom = onValue(roomRef, (snap) => {
-    if (!snap.exists()) {
-      alert("房間已關閉");
-      leaveGame();
-      return;
-    }
-    const room = snap.val();
-    renderFromRoom(room);
+  
+  roomChannel.on('broadcast', { event: 'room_state' }, (payload) => {
+    lastRoomState = payload.payload;
+    renderFromRoom(lastRoomState);
   });
-
+  
+  roomChannel.on('broadcast', { event: 'draw_stroke' }, (payload) => {
+    paintStroke(payload.payload);
+  });
+  
   show("lobbyScreen");
   document.getElementById("lobbyCode").textContent = code;
   document.getElementById("shareLink").textContent = shareUrl(code);
+  renderLobby(lastRoomState);
 }
 
 function renderFromRoom(room) {
-  if (room.status === "lobby") {
-    show("lobbyScreen");
-    renderLobby(room);
-  } else if (room.status === "playing") {
-    show("gameScreen");
-    renderGame(room);
-  } else if (room.status === "finished") {
-    show("finalScreen");
-    renderFinal(room);
-  }
+  if (!room) return;
+  if (room.status === "lobby") { show("lobbyScreen"); renderLobby(room); }
+  else if (room.status === "playing") { show("gameScreen"); renderGame(room); }
+  else if (room.status === "finished") { show("finalScreen"); renderFinal(room); }
 }
 
 function renderLobby(room) {
-  const list = document.getElementById("lobbyList");
   const entries = Object.entries(room.players || {});
   document.getElementById("lobbyCount").textContent = entries.length;
-  list.innerHTML = entries.map(([id, p]) =>
-    `<div><span class="dot ${p.online ? "" : "off"}"></span>${escapeHtml(p.name)}${p.host ? "（房主）" : ""}${id === myId ? " ← 你" : ""}</div>`
+  document.getElementById("lobbyList").innerHTML = entries.map(([id, p]) =>
+    `<div><span class="dot"></span>${escapeHtml(p.name)}${p.host ? "（房主）" : ""}${id === myId ? " ← 你" : ""}</div>`
   ).join("");
 
   const startBtn = document.getElementById("startBtn");
@@ -364,143 +314,131 @@ function renderLobby(room) {
   document.getElementById("btn30").classList.toggle("time-selected", room.selectedTime !== 15);
 }
 
-window.selectTime = async function (sec) {
+window.selectTime = function(sec) {
   selectedTime = sec;
-  if (roomRef && isHost) {
-    await update(roomRef, { selectedTime: sec });
-  } else {
-    document.getElementById("btn15").classList.toggle("time-selected", sec === 15);
-    document.getElementById("btn30").classList.toggle("time-selected", sec !== 15);
+  document.getElementById("btn15").classList.toggle("time-selected", sec === 15);
+  document.getElementById("btn30").classList.toggle("time-selected", sec !== 15);
+  if (isHost && lastRoomState) {
+    lastRoomState.selectedTime = sec;
+    roomChannel.send({ type: 'broadcast', event: 'room_state', payload: lastRoomState });
   }
 };
 
-/* ============================================================
-   7. HOST: START GAME / ROUND MANAGEMENT
-   ============================================================ */
-window.hostStartGame = async function () {
-  if (!isHost || !roomRef) return;
-  const snap = await get(roomRef);
-  const room = snap.val();
-  const ids = Object.keys(room.players || {});
+window.hostStartGame = function() {
+  if (!isHost || !roomChannel || !lastRoomState) return;
+  const ids = Object.keys(lastRoomState.players);
   if (ids.length < 2) return;
-
-  const scores = {};
-  ids.forEach(id => scores[id] = 0);
-  await update(roomRef, {
-    status: "playing",
-    scores,
-    currentRound: {
-      number: 1,
-      category: pickCategory(),
-      word: "",
-      drawerId: "",
-      phase: "setup",
-      startedAt: 0,
-      submittedAt: 0,
-      result: null
-    }
-  });
-  await beginRound(1);
+  
+  lastRoomState.status = "playing";
+  lastRoomState.scores = {};
+  ids.forEach(id => lastRoomState.scores[id] = 0);
+  
+  beginRound(1);
 };
 
-function pickCategory() {
-  return categories[Math.floor(Math.random() * categories.length)];
-}
+function pickCategory() { return categories[Math.floor(Math.random() * categories.length)]; }
 
-async function beginRound(number) {
-  const snap = await get(roomRef);
-  const room = snap.val();
-  const ids = Object.keys(room.players || {});
+function beginRound(number) {
+  const ids = Object.keys(lastRoomState.players);
   const guesserId = ids[(number - 1) % ids.length];
   const drawerIds = ids.filter(id => id !== guesserId);
   const category = pickCategory();
-  const list = wordSets[category];
-  const word = list[Math.floor(Math.random() * list.length)];
+  const word = wordSets[category][Math.floor(Math.random() * wordSets[category].length)];
 
-  await update(roomRef, {
-    "currentRound": {
-      number,
-      category,
-      word,
-      guesserId,
-      drawerIds,
-      phase: "drawing",
-      startedAt: Date.now(),
-      submittedAt: 0,
-      result: null
-    }
-  });
+  lastRoomState.currentRound = {
+    number, category, word, guesserId, drawerIds,
+    phase: "drawing", startedAt: Date.now(), submittedAt: 0, result: null
+  };
+  
+  roomChannel.send({ type: 'broadcast', event: 'room_state', payload: lastRoomState });
+  renderGame(lastRoomState);
+  startGameTimer();
 }
 
-/* ============================================================
-   8. GAME RENDER
-   ============================================================ */
+function startGameTimer() {
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    const r = lastRoomState?.currentRound;
+    if (!r || r.phase !== "drawing") { clearInterval(timerInterval); return; }
+    
+    const elapsed = Math.floor((Date.now() - r.startedAt) / 1000);
+    const left = Math.max(0, lastRoomState.selectedTime - elapsed);
+    const timerEl = document.getElementById("timerDisplay");
+    
+    if (timerEl) {
+      timerEl.textContent = left;
+      timerEl.classList.toggle("warning", left <= 5);
+    }
+    
+    if (left <= 0) {
+      clearInterval(timerInterval);
+      if (isHost) {
+         // Auto submit on time out for drawers
+         if (lastRoomState.currentRound.phase === "drawing") {
+            lastRoomState.currentRound.phase = "guess";
+            roomChannel.send({ type: 'broadcast', event: 'room_state', payload: lastRoomState });
+         }
+      }
+    }
+  }, 1000);
+}
+
 function renderGame(room) {
   const r = room.currentRound;
   if (!r) return;
   currentRoundData = r;
   document.getElementById("roundInfo").textContent = `第 ${r.number} / ${totalRounds} 輪`;
 
-  renderScores(room);
-  renderPlayerButtons(room, r);
+  document.getElementById("scoreBoard").innerHTML = Object.entries(room.players).map(([id, p]) =>
+    `<div class="score-item">${escapeHtml(p.name)}：<strong>${room.scores?.[id] ?? 0}</strong>分</div>`
+  ).join("");
+
+  const area = document.getElementById("playerButtons");
+  area.innerHTML = "";
+  Object.entries(room.players).forEach(([id, p]) => {
+    const btn = document.createElement("button");
+    btn.textContent = p.name + (id === r.guesserId ? " (猜)" : " (畫)");
+    if (id === myId) btn.classList.add("active-player");
+    btn.disabled = true;
+    area.appendChild(btn);
+  });
 
   const iAmGuesser = r.guesserId === myId;
   const iAmDrawer = (r.drawerIds || []).includes(myId);
-  const guesserName = room.players?.[r.guesserId]?.name || "?";
-  const drawerNames = (r.drawerIds || []).map(id => room.players?.[id]?.name || "?").join("、");
-
   const timerEl = document.getElementById("timerDisplay");
 
   if (r.phase === "drawing") {
-    const elapsed = Math.floor((Date.now() - r.startedAt) / 1000);
-    const left = Math.max(0, room.selectedTime - elapsed);
     timerEl.classList.remove("hidden");
-    timerEl.textContent = left;
-    timerEl.classList.toggle("warning", left <= 5);
+    if (!timerInterval) startGameTimer();
 
     if (iAmDrawer) {
-      document.getElementById("info").innerHTML = `
-        <div class="category-tag">${escapeHtml(r.category)}</div>
-        <div style="color:#ff8fab">你係畫家</div>
-        <div style="font-size:2rem; margin:8px 0;">${escapeHtml(r.word)}</div>
-        <div>快啲畫！</div>`;
+      document.getElementById("info").innerHTML = `<div class="category-tag">${escapeHtml(r.category)}</div><div style="color:#ff8fab">你係畫家</div><div style="font-size:2rem; margin:8px 0;">${escapeHtml(r.word)}</div><div>快啲畫！</div>`;
       document.getElementById("drawingTools").classList.remove("hidden");
       document.getElementById("submitBtn").classList.remove("hidden");
       document.getElementById("guessArea").classList.add("hidden");
-      setupDrawingCanvas(r);
-      if (left <= 0 && !drawingSubmittedLocal) {
-        document.getElementById("submitBtn").classList.add("hidden");
-      }
     } else if (iAmGuesser) {
-      document.getElementById("info").innerHTML = `
-        <div class="category-tag">${escapeHtml(r.category)}</div>
-        <div style="color:#ff9ff3">你係猜題者</div>
-        <div>畫家（${escapeHtml(drawerNames)}）畫緊，等等～</div>`;
+      document.getElementById("info").innerHTML = `<div class="category-tag">${escapeHtml(r.category)}</div><div style="color:#ff9ff3">你係猜題者</div><div>畫家畫緊，等等～</div>`;
       document.getElementById("drawingTools").classList.add("hidden");
       document.getElementById("guessArea").classList.add("hidden");
-      document.getElementById("submitBtn").classList.add("hidden");
     } else {
-      document.getElementById("info").innerHTML = `
-        <div>猜題者：<span style="color:#ff9ff3">${escapeHtml(guesserName)}</span></div>
-        <div>畫家：<span style="color:#7bed9f">${escapeHtml(drawerNames)}</span></div>`;
+      document.getElementById("info").innerHTML = `<div>遊戲進行中…</div>`;
       document.getElementById("drawingTools").classList.add("hidden");
       document.getElementById("guessArea").classList.add("hidden");
     }
   } else if (r.phase === "guess") {
+    clearInterval(timerInterval);
     timerEl.classList.add("hidden");
     document.getElementById("drawingTools").classList.add("hidden");
     document.getElementById("submitBtn").classList.add("hidden");
     if (iAmGuesser) {
-      document.getElementById("info").innerHTML = `
-        <div class="category-tag">${escapeHtml(r.category)}</div>
-        <div style="color:#70a1ff">畫已經提交！快啲估答案</div>`;
+      document.getElementById("info").innerHTML = `<div class="category-tag">${escapeHtml(r.category)}</div><div style="color:#70a1ff">畫已經提交！快啲估答案</div>`;
       document.getElementById("guessArea").classList.remove("hidden");
     } else {
-      document.getElementById("info").innerHTML = `
-        <div style="color:#00b894">畫作已提交！等緊猜題者回答</div>`;
+      document.getElementById("info").innerHTML = `<div style="color:#00b894">畫作已提交！等緊猜題者回答</div>`;
       document.getElementById("guessArea").classList.add("hidden");
     }
   } else if (r.phase === "result") {
+    clearInterval(timerInterval);
     timerEl.classList.add("hidden");
     document.getElementById("drawingTools").classList.add("hidden");
     document.getElementById("guessArea").classList.add("hidden");
@@ -509,150 +447,71 @@ function renderGame(room) {
   }
 }
 
-function renderScores(room) {
-  const html = Object.entries(room.players || {}).map(([id, p]) =>
-    `<div class="score-item">${escapeHtml(p.name)}：<strong>${room.scores?.[id] ?? 0}</strong>分</div>`
-  ).join("");
-  document.getElementById("scoreBoard").innerHTML = html;
-}
+window.clearCanvas = function() { resetCanvas(); };
 
-function renderPlayerButtons(room, r) {
-  const area = document.getElementById("playerButtons");
-  area.innerHTML = "";
-  Object.entries(room.players || {}).forEach(([id, p]) => {
-    const btn = document.createElement("button");
-    const role = id === r.guesserId ? "(猜)" : "(畫)";
-    btn.textContent = p.name + " " + role;
-    if (id === myId) btn.classList.add("active-player");
-    btn.disabled = true;
-    area.appendChild(btn);
-  });
-}
-
-function setupDrawingCanvas(r) {
-  const roundKey = r.number + "-" + r.startedAt;
-  if (drawnRoundKey === roundKey) return;
-  drawnRoundKey = roundKey;
-  drawingSubmittedLocal = false;
-  resetCanvas();
-  listenForDrawStrokes(roundKey);
-}
-
-function listenForDrawStrokes(roundKey) {
-  if (unsubDraw) unsubDraw();
-  const strokesRef = ref(db, `rooms/${roomId}/drawings`);
-  unsubDraw = onValue(strokesRef, (snap) => {
-    const data = snap.val() || {};
-    const key = Object.keys(data).sort().join(",");
-    if (key === lastRenderedKey) return;
-    lastRenderedKey = key;
-    resetCanvas();
-    Object.keys(data).sort().forEach(k => paintStroke(data[k]));
-  });
-}
-
-function paintStroke(s) {
-  if (!s) return;
-  ctx.beginPath();
-  ctx.lineWidth = s.size;
-  ctx.lineCap = "round";
-  ctx.strokeStyle = s.color;
-  ctx.moveTo(s.x1, s.y1);
-  ctx.lineTo(s.x2, s.y2);
-  ctx.stroke();
-  ctx.beginPath();
-}
-
-window.clearCanvas = async function () {
-  resetCanvas();
-  if (roomRef) await remove(ref(db, `rooms/${roomId}/drawings`));
-};
-
-window.submitDrawing = async function () {
-  if (!roomRef || !currentRoundData) return;
-  if (drawingSubmittedLocal) return;
+window.submitDrawing = function() {
+  if (!roomChannel || !currentRoundData || drawingSubmittedLocal) return;
   drawingSubmittedLocal = true;
-  const submittedAt = Date.now();
-  await update(roomRef, {
-    "currentRound/phase": "guess",
-    "currentRound/submittedAt": submittedAt
-  });
+  lastRoomState.currentRound.phase = "guess";
+  lastRoomState.currentRound.submittedAt = Date.now();
+  roomChannel.send({ type: 'broadcast', event: 'room_state', payload: lastRoomState });
+  renderGame(lastRoomState);
 };
 
-/* ============================================================
-   9. GUESSING
-   ============================================================ */
-window.checkAnswer = async function () {
+window.checkAnswer = function() {
   if (!currentRoundData) return;
   const guess = document.getElementById("guessInput").value.trim();
   if (!guess) return alert("請先輸入答案！");
   const r = currentRoundData;
-  const roomSnap = await get(roomRef);
-  const room = roomSnap.val();
+  const room = lastRoomState;
   const correct = guess === r.word;
 
   const resultArea = document.getElementById("resultArea");
   resultArea.classList.remove("hidden");
   document.getElementById("guessArea").classList.add("hidden");
 
-  let resultHtml = "";
-  const updates = {};
-
   if (correct) {
     const elapsed = Math.max(1, Math.floor((Date.now() - r.startedAt) / 1000));
     const points = Math.max(1, 11 - Math.floor(elapsed / 3));
-    updates[`scores/${r.guesserId}`] = (room.scores?.[r.guesserId] || 0) + 3;
+    room.scores[r.guesserId] = (room.scores[r.guesserId] || 0) + 3;
     (r.drawerIds || []).forEach(id => {
-      updates[`scores/${id}`] = (room.scores?.[id] || 0) + points;
+      room.scores[id] = (room.scores[id] || 0) + points;
     });
-    resultHtml = `
+    resultArea.innerHTML = `
       <div class="winner-box">
         <div style="font-size:1.8rem; color:#e67e22;">答對啦！</div>
         <div style="font-size:1.3rem; margin:8px 0;">答案：${escapeHtml(r.word)}</div>
         <div>用時：${elapsed} 秒</div>
-        <div>畫家各得 ${points} 分，猜題者得 3 分</div>
       </div>`;
   } else {
-    resultHtml = `<div style="color:#ff6b6b; font-size:1.4rem; margin:15px 0;">唔中！呢輪無人得分</div>`;
+    resultArea.innerHTML = `<div style="color:#ff6b6b; font-size:1.4rem; margin:15px 0;">唔中！呢輪無人得分</div>`;
   }
 
-  updates["currentRound/phase"] = "result";
-  updates["currentRound/result"] = { correct, guess, at: Date.now() };
-  await update(roomRef, updates);
+  room.currentRound.phase = "result";
+  room.currentRound.result = { correct, guess };
+  roomChannel.send({ type: 'broadcast', event: 'room_state', payload: room });
 
-  resultArea.innerHTML = resultHtml;
-
-  if (isHost) {
-    document.getElementById("nextRoundBtn").classList.remove("hidden");
-  }
+  if (isHost) document.getElementById("nextRoundBtn").classList.remove("hidden");
 };
 
-/* ============================================================
-   10. NEXT ROUND / FINAL
-   ============================================================ */
-window.nextRound = async function () {
-  if (!isHost || !roomRef) return;
-  const snap = await get(roomRef);
-  const room = snap.val();
-  const n = room.currentRound?.number || 1;
+window.nextRound = function() {
+  if (!isHost || !roomChannel || !lastRoomState) return;
+  const n = lastRoomState.currentRound?.number || 1;
   if (n >= totalRounds) {
-    await update(roomRef, { status: "finished" });
+    lastRoomState.status = "finished";
+    roomChannel.send({ type: 'broadcast', event: 'room_state', payload: lastRoomState });
+    renderFinal(lastRoomState);
   } else {
-    await beginRound(n + 1);
+    beginRound(n + 1);
   }
 };
 
 function renderResult(room, r) {
   const resultArea = document.getElementById("resultArea");
   resultArea.classList.remove("hidden");
-  const res = r.result;
-  if (!res) { resultArea.innerHTML = ""; return; }
-  if (res.correct) {
-    resultArea.innerHTML = `
-      <div class="winner-box">
-        <div style="font-size:1.8rem; color:#e67e22;">答對啦！</div>
-        <div style="font-size:1.3rem; margin:8px 0;">答案：${escapeHtml(r.word)}</div>
-      </div>`;
+  if (!r.result) { resultArea.innerHTML = ""; return; }
+  if (r.result.correct) {
+    resultArea.innerHTML = `<div class="winner-box"><div style="font-size:1.8rem; color:#e67e22;">答對啦！</div><div style="font-size:1.3rem; margin:8px 0;">答案：${escapeHtml(r.word)}</div></div>`;
   } else {
     resultArea.innerHTML = `<div style="color:#ff6b6b; font-size:1.4rem; margin:15px 0;">唔中！呢輪無人得分</div>`;
   }
@@ -666,42 +525,16 @@ function renderFinal(room) {
   document.getElementById("finalScores").innerHTML = sorted.map(([id, s], i) =>
     `<div style="margin:8px 0;">${i + 1}. ${escapeHtml(nameOf(id))}：<strong>${s}</strong> 分</div>`
   ).join("");
-  
   if (sorted.length) {
-    document.getElementById("winnerAnnounce").innerHTML = `
-      🏆 優勝者係<br>
-      <span style="font-size:2.2rem; color:#e67e22;">${escapeHtml(nameOf(sorted[0][0]))}</span><br>
-      共 ${sorted[0][1]} 分！
-    `;
-  } else {
-    document.getElementById("winnerAnnounce").innerHTML = "";
+    document.getElementById("winnerAnnounce").innerHTML = `🏆 優勝者係<br><span style="font-size:2.2rem; color:#e67e22;">${escapeHtml(nameOf(sorted[0][0]))}</span><br>共 ${sorted[0][1]} 分！`;
   }
 }
 
-/* ============================================================
-   11. UI & CANVAS UTILITIES
-   ============================================================ */
-function escapeHtml(str) {
-  if (!str) return "";
-  return String(str).replace(/[&<>"']/g, function(m) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
-  });
-}
-
-window.copyShareLink = function () {
-  const link = document.getElementById("shareLink").textContent;
-  navigator.clipboard.writeText(link).then(() => {
-    alert("連結已複製！");
-  });
+window.copyShareLink = function() {
+  navigator.clipboard.writeText(document.getElementById("shareLink").textContent).then(() => alert("連結已複製！"));
 };
-
-window.leaveGame = function () {
-  if (unsubRoom) unsubRoom();
-  if (unsubDraw) unsubDraw();
-  location.reload();
-};
-
-window.setSize = function (s) { brushSize = s; };
+window.leaveGame = function() { location.reload(); };
+window.setSize = function(s) { brushSize = s; };
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -740,21 +573,17 @@ function getPos(e) {
   return { x: x * scaleX, y: y * scaleY };
 }
 
-let lastX = 0;
-let lastY = 0;
-
-async function startDraw(e) {
+function startDraw(e) {
   const r = currentRoundData;
   if (!r || !(r.drawerIds || []).includes(myId) || r.phase !== "drawing") return;
   painting = true;
   const pos = getPos(e);
-  lastX = pos.x;
-  lastY = pos.y;
+  lastX = pos.x; lastY = pos.y;
   e.preventDefault();
 }
 
-async function draw(e) {
-  if (!painting || !roomRef) return;
+function draw(e) {
+  if (!painting || !roomChannel) return;
   const pos = getPos(e);
   e.preventDefault();
 
@@ -767,15 +596,22 @@ async function draw(e) {
   ctx.stroke();
   ctx.beginPath();
 
-  const strokeData = {
-    x1: lastX, y1: lastY, x2: pos.x, y2: pos.y,
-    color: brushColor, size: brushSize
-  };
-  const newStrokeRef = push(ref(db, `rooms/${roomId}/drawings`));
-  set(newStrokeRef, strokeData);
+  const stroke = { x1: lastX, y1: lastY, x2: pos.x, y2: pos.y, color: brushColor, size: brushSize };
+  roomChannel.send({ type: 'broadcast', event: 'draw_stroke', payload: stroke });
+  
+  lastX = pos.x; lastY = pos.y;
+}
 
-  lastX = pos.x;
-  lastY = pos.y;
+function paintStroke(s) {
+  if (!s) return;
+  ctx.beginPath();
+  ctx.lineWidth = s.size;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = s.color;
+  ctx.moveTo(s.x1, s.y1);
+  ctx.lineTo(s.x2, s.y2);
+  ctx.stroke();
+  ctx.beginPath();
 }
 
 function stopDraw() { painting = false; }
@@ -787,6 +623,7 @@ canvas.addEventListener("mouseout", stopDraw);
 canvas.addEventListener("touchstart", startDraw);
 canvas.addEventListener("touchmove", draw);
 canvas.addEventListener("touchend", stopDraw);
+
 </script>
 </body>
 </html>
