@@ -158,20 +158,20 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
 const SUPABASE_URL = "https://iamapainterinhk.supabase.co";
-// Using the legacy anon key from your screenshot
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpseGJhY2Nqa2dodmR6bmFxdHZzbSIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzE1MjA2NDAwLCJleHAiOjIwMzA3ODI0MDB9.p7aJ9bB1yH5k8Q4r7X3w2v1u0t9s8r7q6p5o4n3m2l1k";
 
-// Force WebSocket reconnection if network drops it
+// --- WEBSOCKET FIX ---
+const myCustomFetch = (...args) => fetch(...args);
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  global: {
+    fetch: myCustomFetch
+  },
   realtime: {
-    params: {
-      eventsPerSecond: 10,
-      apikey: SUPABASE_KEY 
-    },
-    timeout: 20000,
-    heartbeatIntervalMs: 5000
+    transport: WebSocket
   }
 });
+// ---------------------
 
 const wordSets = {
   "香港歌手": ["張學友", "劉德華", "黎明", "郭富城", "鄧麗君", "梅艷芳", "陳奕迅", "楊千嬅", "容祖兒", "古巨基", "衛蘭", "林家謙", "張敬軒", "周杰倫", "林俊傑", "鄧紫棋"],
