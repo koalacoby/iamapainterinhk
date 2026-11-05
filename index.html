@@ -1,3 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我是小小畫家（多人房間版）</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(135deg, #ffeef2, #e8f8f5, #f3e8ff, #fff5e6);
+    background-size: 400% 400%;
+    animation: gradientBG 12s ease infinite;
+    color: #5d4b6e;
+    font-family: 'Nunito', "Microsoft JhengHei", "PingFang HK", "Noto Sans TC", sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+  }
+  @keyframes gradientBG {
+    0% {background-position: 0% 50%;}
+    50% {background-position: 100% 50%;}
+    100% {background-position: 0% 50%;}
+  }
+  h1 { margin: 12px 0 8px; font-size: 2.3rem; color: #ff8fab; text-shadow: 2px 2px 0 #fff; }
+  .panel {
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 24px;
+    padding: 22px;
+    margin-bottom: 16px;
+    width: 100%;
+    max-width: 920px;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(255, 143, 171, 0.15);
+    border: 3px solid #ffd6e0;
+  }
+  button {
+    padding: 12px 22px; font-size: 16px; border: none; border-radius: 50px;
+    background: #ff8fab; color: white; cursor: pointer; margin: 6px;
+    transition: 0.25s; font-weight: 700; box-shadow: 0 4px 0 #f76c8b;
+  }
+  button:hover { transform: translateY(-3px); box-shadow: 0 7px 0 #f76c8b; }
+  button:active { transform: translateY(1px); }
+  button.mint { background: #7bed9f; box-shadow: 0 4px 0 #2ed573; }
+  button.lavender { background: #c9b1ff; box-shadow: 0 4px 0 #a29bfe; }
+  button.peach { background: #ffc107; box-shadow: 0 4px 0 #ffa000; color: #5d4b6e; }
+  button.danger { background: #ff6b6b; box-shadow: 0 4px 0 #ee5253; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: 0 4px 0 #f76c8b; }
+  button.active-player { background: #ff6b9d; box-shadow: 0 0 0 4px #fff, 0 4px 0 #f76c8b; }
+  button.time-selected { background: #ff6b9d !important; box-shadow: 0 0 0 4px #fff, 0 4px 0 #f76c8b !important; }
+  .player-buttons { margin: 14px 0; }
+  .colors { display: flex; gap: 8px; justify-content: center; margin: 12px 0; flex-wrap: wrap; }
+  .color-btn { width: 34px; height: 34px; border-radius: 50%; border: 4px solid transparent; cursor: pointer; transition: 0.2s; }
+  .color-btn.active { border-color: #5d4b6e; transform: scale(1.2); }
+  #canvas {
+    background: white; border-radius: 20px; cursor: crosshair; touch-action: none;
+    margin: 12px 0; border: 4px solid #ffd6e0; box-shadow: 0 8px 25px rgba(255, 143, 171, 0.2);
+    max-width: 100%; height: auto;
+  }
+  #info { font-size: 1.35rem; min-height: 60px; margin: 12px 0; font-weight: 700; line-height: 1.5; }
+  .score-board { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .score-item { background: #fff0f5; padding: 8px 16px; border-radius: 50px; font-size: 15px; border: 2px solid #ffd6e0; }
+  .timer { font-size: 3rem; font-weight: 800; color: #ff6b6b; margin: 10px 0; }
+  .timer.warning { color: #e74c3c; animation: pulse 0.5s infinite; }
+  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+  .category-tag { display: inline-block; background: #ffeaa7; color: #5d4b6e; padding: 4px 14px; border-radius: 50px; font-size: 14px; margin-bottom: 6px; }
+  .winner-box { background: linear-gradient(135deg, #ffecd2, #fcb69f); border-radius: 20px; padding: 20px; margin: 15px 0; border: 3px solid #ff9f43; }
+  .guesser-label { background: #ff9ff3; color: white; padding: 3px 10px; border-radius: 20px; font-size: 13px; margin-left: 8px; }
+  .round-info { font-size: 1.15rem; color: #7f8c8d; margin-bottom: 8px; }
+  .hidden { display: none !important; }
+  input[type="text"] { padding: 12px 18px; font-size: 16px; border-radius: 50px; border: 3px solid #ffd6e0; width: 220px; margin: 6px; outline: none; }
+  .room-code { font-size: 2.4rem; font-weight: 800; letter-spacing: 6px; color: #e84393; margin: 10px 0; }
+  .share-link { font-size: 0.85rem; word-break: break-all; color: #7f8c8d; margin: 8px 0; }
+  .lobby-list { margin: 12px 0; font-size: 1.1rem; }
+  .lobby-list div { padding: 4px 0; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #2ed573; margin-right: 8px; }
+  .dot.off { background: #b2bec3; }
+</style>
+</head>
+<body>
+
+<h1>我是小小畫家</h1>
+
+<!-- HOME -->
+<div id="homeScreen" class="panel">
+  <h2 style="margin-bottom:12px;">多人房間</h2>
+  <div style="margin: 10px 0;">
+    <input type="text" id="nicknameInput" placeholder="你嘅名" maxlength="12" value="">
+  </div>
+  <button class="mint" onclick="createRoom()">建立房間</button>
+  <div style="margin: 18px 0 8px; color:#7f8c8d;">或者輸入房間代碼加入</div>
+  <input type="text" id="joinCodeInput" placeholder="房間代碼" maxlength="6" style="text-transform:uppercase;">
+  <button class="lavender" onclick="joinRoom()">加入房間</button>
+  <div id="homeMsg" style="color:#e74c3c; margin-top:10px; min-height:20px;"></div>
+</div>
+
+<!-- LOBBY -->
+<div id="lobbyScreen" class="panel hidden">
+  <h2 style="margin-bottom:8px;">房間已建立</h2>
+  <div class="room-code" id="lobbyCode">------</div>
+  <div class="share-link" id="shareLink"></div>
+  <button class="peach" onclick="copyShareLink()">複製邀請連結</button>
+  <h3 style="margin:18px 0 8px;">玩家（<span id="lobbyCount">0</span>）</h3>
+  <div class="lobby-list" id="lobbyList"></div>
+  <div style="margin:14px 0;">
+    <h3 style="margin-bottom:8px;">繪畫時間</h3>
+    <button id="btn15" onclick="selectTime(15)">15 秒</button>
+    <button id="btn30" class="time-selected" onclick="selectTime(30)">30 秒</button>
+  </div>
+  <button id="startBtn" class="mint" onclick="hostStartGame()" disabled>開始遊戲（至少 2 人）</button>
+  <div style="font-size:0.85rem; color:#7f8c8d; margin-top:10px;">只有房主可以開始遊戲</div>
+</div>
+
+<!-- GAME -->
+<div id="gameScreen" class="panel hidden">
+  <div class="round-info" id="roundInfo">第 1 / 5 輪</div>
+  <div class="score-board" id="scoreBoard"></div>
+  <div class="player-buttons" id="playerButtons"></div>
+
+  <div id="timerDisplay" class="timer hidden">30</div>
+  <div id="info">等待開始…</div>
+
+  <div id="drawingTools" class="hidden">
+    <div class="colors" id="colorPalette"></div>
+    <button onclick="setSize(5)">細</button>
+    <button onclick="setSize(12)">中</button>
+    <button onclick="setSize(22)">大</button>
+    <button onclick="setSize(36)">超大</button>
+    <button class="danger" onclick="clearCanvas()">清除</button>
+    <button id="submitBtn" class="peach hidden" onclick="submitDrawing()">提交畫作</button>
+  </div>
+
+  <canvas id="canvas" width="740" height="420"></canvas>
+
+  <div id="guessArea" class="hidden">
+    <input type="text" id="guessInput" placeholder="輸入你嘅答案...">
+    <button class="mint" onclick="checkAnswer()">提交答案</button>
+  </div>
+
+  <div id="resultArea" class="hidden"></div>
+
+  <br>
+  <button id="nextRoundBtn" class="lavender hidden" onclick="nextRound()">進入下一輪</button>
+  <button class="danger" onclick="leaveGame()">離開房間</button>
+</div>
+
+<!-- FINAL RESULT -->
+<div id="finalScreen" class="panel hidden">
+  <h2 style="color:#e67e22; font-size:2rem;">遊戲結束！</h2>
+  <div id="finalScores" style="margin:20px 0; font-size:1.3rem;"></div>
+  <div id="winnerAnnounce" class="winner-box" style="font-size:1.8rem;"></div>
+  <br>
+  <button class="mint" onclick="leaveGame()">再玩一次</button>
+</div>
+
+<script type="module">
+/* ============================================================
+   1. FIREBASE SETUP
+   ============================================================ */
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getDatabase, ref, set, get, update, onValue, remove, onDisconnect, push, child }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+// REPLACE THESE WITH YOUR ACTUAL FIREBASE CONFIG
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+/* ============================================================
+   2. GAME CONTENT
+   ============================================================ */
+const wordSets = {
+  "香港歌手": ["張學友", "劉德華", "黎明", "郭富城", "鄧麗君", "梅艷芳", "陳奕迅", "楊千嬅", "容祖兒", "古巨基", "衛蘭", "林家謙", "張敬軒", "周杰倫", "林俊傑", "鄧紫棋"],
+  "香港交通": ["叮叮", "天星小輪", "巴士", "小巴", "港鐵", "的士", "電車", "渡輪", "機場巴士", "纜車"],
+  "港鐵站": ["中環", "金鐘", "尖沙咀", "旺角", "銅鑼灣", "太子", "深水埗", "觀塘", "黃埔", "鑽石山", "大圍", "沙田", "將軍澳", "寶琳", "油塘", "何文田", "啟德", "九龍塘", "美孚"],
+  "職業": ["醫生", "護士", "老師", "警察", "消防員", "司機", "廚師", "律師", "會計師", "設計師", "工程師", "記者", "攝影師", "理髮師", "店員", "侍應", "老闆", "學生"],
+  "香港美食": ["蛋撻", "菠蘿包", "奶茶", "檸檬茶", "魚蛋", "燒賣", "叉燒包", "雞蛋仔", "格子餅", "車仔麵", "公仔麵", "牛河", "鳳爪", "流沙包", "腸粉", "粥", "臭豆腐"],
+  "香港地方": ["維多利亞港", "太平山", "廟街", "女人街", "蘭桂坊", "旺角", "銅鑼灣", "尖沙咀", "中環", "深水埗", "西貢", "大嶼山", "迪士尼", "海洋公園"]
+};
+const categories = Object.keys(wordSets);
+
+const colors = [
+  "#5d4b6e", "#ff8fab", "#7bed9f", "#70a1ff", "#ffa502",
+  "#c9b1ff", "#ff6b6b", "#2ed573", "#1e90ff", "#ff9f43",
+  "#e84393", "#00cec9", "#fd79a8", "#6c5ce7", "#ffffff"
+];
+
+/* ============================================================
+   3. STATE
+   ============================================================ */
+let roomId = null;
+let myId = null;
+let myName = "";
+let isHost = false;
+let roomRef = null;
+let unsubRoom = null;
+let unsubDraw = null;
+
+let selectedTime = 30;
+let brushColor = "#5d4b6e";
+let brushSize = 12;
+let painting = false;
+let drawingSubmittedLocal = false;
+
+let currentRoundData = null;
+let drawnRoundKey = "";
+let lastRenderedKey = "";
+
+const totalRounds = 5;
+
+/* ============================================================
+   4. HELPERS
+   ============================================================ */
+function uid() { return Math.random().toString(36).slice(2, 10); }
+function roomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+function shareUrl(code) {
+  const base = location.origin + location.pathname;
+  return `${base}?room=${code}`;
+}
+function show(screenId) {
+  ["homeScreen", "lobbyScreen", "gameScreen", "finalScreen"].forEach(id => {
+    document.getElementById(id).classList.toggle("hidden", id !== screenId);
+  });
+}
+function toast(msg, el = "homeMsg") {
+  const e = document.getElementById(el);
+  if (e) e.textContent = msg;
+}
+
+/* ============================================================
+   5. HOME / CREATE / JOIN
+   ============================================================ */
+myId = uid();
+
+function getNickname() {
+  const v = document.getElementById("nicknameInput").value.trim();
+  return v || "玩家";
+}
+
+window.createRoom = async function () {
+  myName = getNickname();
+  const code = roomCode();
+  const room = {
+    host: myId,
+    createdAt: Date.now(),
+    status: "lobby",
+    selectedTime: selectedTime,
+    players: { [myId]: { name: myName, host: true, online: true } },
+    scores: { [myId]: 0 },
+    currentRound: null
+  };
+  try {
+    await set(ref(db, "rooms/" + code), room);
+    enterRoom(code, true);
+  } catch (e) {
+    toast("建立房間失敗：" + e.message);
+  }
+};
+
+window.joinRoom = async function () {
+  const code = (document.getElementById("joinCodeInput").value || "").trim().toUpperCase();
+  if (code.length < 4) return toast("請輸入正確房間代碼");
+  myName = getNickname();
+  try {
+    const snap = await get(ref(db, "rooms/" + code));
+    if (!snap.exists()) return toast("房間唔存在");
+    const r = snap.val();
+    if (r.status !== "lobby") return toast("遊戲已經開始，無法加入");
+    const playerCount = Object.keys(r.players || {}).length;
+    if (playerCount >= 8) return toast("房間已滿");
+    await update(ref(db, `rooms/${code}/players/${myId}`), { name: myName, host: false, online: true });
+    await update(ref(db, `rooms/${code}/scores/${myId}`), 0);
+    enterRoom(code, false);
+  } catch (e) {
+    toast("加入失敗：" + e.message);
+  }
+};
+
+window.addEventListener("DOMContentLoaded", () => {
+  const params = new URLSearchParams(location.search);
+  const pre = params.get("room");
+  if (pre) {
+    document.getElementById("joinCodeInput").value = pre.toUpperCase();
+    show("homeScreen");
+  }
+});
+
+/* ============================================================
+   6. ROOM SUBSCRIPTION
+   ============================================================ */
+function enterRoom(code, host) {
+  roomId = code;
+  isHost = host;
+  roomRef = ref(db, "rooms/" + code);
+
+  const meRef = ref(db, `rooms/${code}/players/${myId}/online`);
+  set(meRef, true);
+  onDisconnect(meRef).set(false);
+
+  history.replaceState(null, "", "?room=" + code);
+
+  if (unsubRoom) unsubRoom();
+  unsubRoom = onValue(roomRef, (snap) => {
+    if (!snap.exists()) {
+      alert("房間已關閉");
+      leaveGame();
+      return;
+    }
+    const room = snap.val();
+    renderFromRoom(room);
+  });
+
+  show("lobbyScreen");
+  document.getElementById("lobbyCode").textContent = code;
+  document.getElementById("shareLink").textContent = shareUrl(code);
+}
+
+function renderFromRoom(room) {
+  if (room.status === "lobby") {
+    show("lobbyScreen");
+    renderLobby(room);
+  } else if (room.status === "playing") {
+    show("gameScreen");
+    renderGame(room);
+  } else if (room.status === "finished") {
+    show("finalScreen");
+    renderFinal(room);
+  }
+}
+
+function renderLobby(room) {
+  const list = document.getElementById("lobbyList");
+  const entries = Object.entries(room.players || {});
+  document.getElementById("lobbyCount").textContent = entries.length;
+  list.innerHTML = entries.map(([id, p]) =>
+    `<div><span class="dot ${p.online ? "" : "off"}"></span>${escapeHtml(p.name)}${p.host ? "（房主）" : ""}${id === myId ? " ← 你" : ""}</div>`
+  ).join("");
+
+  const startBtn = document.getElementById("startBtn");
+  if (isHost) {
+    startBtn.classList.remove("hidden");
+    startBtn.disabled = entries.length < 2;
+    startBtn.textContent = entries.length < 2 ? "開始遊戲（至少 2 人）" : "開始遊戲";
+  } else {
+    startBtn.classList.add("hidden");
+  }
+  document.getElementById("btn15").classList.toggle("time-selected", room.selectedTime === 15);
+  document.getElementById("btn30").classList.toggle("time-selected", room.selectedTime !== 15);
+}
+
+window.selectTime = async function (sec) {
+  selectedTime = sec;
+  if (roomRef && isHost) {
+    await update(roomRef, { selectedTime: sec });
+  } else {
+    document.getElementById("btn15").classList.toggle("time-selected", sec === 15);
+    document.getElementById("btn30").classList.toggle("time-selected", sec !== 15);
+  }
+};
+
+/* ============================================================
+   7. HOST: START GAME / ROUND MANAGEMENT
+   ============================================================ */
+window.hostStartGame = async function () {
+  if (!isHost || !roomRef) return;
+  const snap = await get(roomRef);
+  const room = snap.val();
+  const ids = Object.keys(room.players || {});
+  if (ids.length < 2) return;
+
+  const scores = {};
+  ids.forEach(id => scores[id] = 0);
+  await update(roomRef, {
+    status: "playing",
+    scores,
+    currentRound: {
+      number: 1,
+      category: pickCategory(),
+      word: "",
+      drawerId: "",
+      phase: "setup",
+      startedAt: 0,
+      submittedAt: 0,
+      result: null
+    }
+  });
+  await beginRound(1);
+};
+
+function pickCategory() {
+  return categories[Math.floor(Math.random() * categories.length)];
+}
+
+async function beginRound(number) {
+  const snap = await get(roomRef);
+  const room = snap.val();
+  const ids = Object.keys(room.players || {});
+  const guesserId = ids[(number - 1) % ids.length];
+  const drawerIds = ids.filter(id => id !== guesserId);
+  const category = pickCategory();
+  const list = wordSets[category];
+  const word = list[Math.floor(Math.random() * list.length)];
+
+  await update(roomRef, {
+    "currentRound": {
+      number,
+      category,
+      word,
+      guesserId,
+      drawerIds,
+      phase: "drawing",
+      startedAt: Date.now(),
+      submittedAt: 0,
+      result: null
+    }
+  });
+}
+
+/* ============================================================
+   8. GAME RENDER
+   ============================================================ */
+function renderGame(room) {
+  const r = room.currentRound;
+  if (!r) return;
+  currentRoundData = r;
+  document.getElementById("roundInfo").textContent = `第 ${r.number} / ${totalRounds} 輪`;
+
+  renderScores(room);
+  renderPlayerButtons(room, r);
+
+  const iAmGuesser = r.guesserId === myId;
+  const iAmDrawer = (r.drawerIds || []).includes(myId);
+  const guesserName = room.players?.[r.guesserId]?.name || "?";
+  const drawerNames = (r.drawerIds || []).map(id => room.players?.[id]?.name || "?").join("、");
+
+  const timerEl = document.getElementById("timerDisplay");
+
+  if (r.phase === "drawing") {
+    const elapsed = Math.floor((Date.now() - r.startedAt) / 1000);
+    const left = Math.max(0, room.selectedTime - elapsed);
+    timerEl.classList.remove("hidden");
+    timerEl.textContent = left;
+    timerEl.classList.toggle("warning", left <= 5);
+
+    if (iAmDrawer) {
+      document.getElementById("info").innerHTML = `
+        <div class="category-tag">${escapeHtml(r.category)}</div>
+        <div style="color:#ff8fab">你係畫家</div>
+        <div style="font-size:2rem; margin:8px 0;">${escapeHtml(r.word)}</div>
+        <div>快啲畫！</div>`;
+      document.getElementById("drawingTools").classList.remove("hidden");
+      document.getElementById("submitBtn").classList.remove("hidden");
+      document.getElementById("guessArea").classList.add("hidden");
+      setupDrawingCanvas(r);
+      if (left <= 0 && !drawingSubmittedLocal) {
+        document.getElementById("submitBtn").classList.add("hidden");
+      }
+    } else if (iAmGuesser) {
+      document.getElementById("info").innerHTML = `
+        <div class="category-tag">${escapeHtml(r.category)}</div>
+        <div style="color:#ff9ff3">你係猜題者</div>
+        <div>畫家（${escapeHtml(drawerNames)}）畫緊，等等～</div>`;
+      document.getElementById("drawingTools").classList.add("hidden");
+      document.getElementById("guessArea").classList.add("hidden");
+      document.getElementById("submitBtn").classList.add("hidden");
+    } else {
+      document.getElementById("info").innerHTML = `
+        <div>猜題者：<span style="color:#ff9ff3">${escapeHtml(guesserName)}</span></div>
+        <div>畫家：<span style="color:#7bed9f">${escapeHtml(drawerNames)}</span></div>`;
+      document.getElementById("drawingTools").classList.add("hidden");
+      document.getElementById("guessArea").classList.add("hidden");
+    }
+  } else if (r.phase === "guess") {
+    timerEl.classList.add("hidden");
+    document.getElementById("drawingTools").classList.add("hidden");
+    document.getElementById("submitBtn").classList.add("hidden");
+    if (iAmGuesser) {
+      document.getElementById("info").innerHTML = `
+        <div class="category-tag">${escapeHtml(r.category)}</div>
+        <div style="color:#70a1ff">畫已經提交！快啲估答案</div>`;
+      document.getElementById("guessArea").classList.remove("hidden");
+    } else {
+      document.getElementById("info").innerHTML = `
+        <div style="color:#00b894">畫作已提交！等緊猜題者回答</div>`;
+      document.getElementById("guessArea").classList.add("hidden");
+    }
+  } else if (r.phase === "result") {
+    timerEl.classList.add("hidden");
+    document.getElementById("drawingTools").classList.add("hidden");
+    document.getElementById("guessArea").classList.add("hidden");
+    document.getElementById("submitBtn").classList.add("hidden");
+    renderResult(room, r);
+  }
+}
+
+function renderScores(room) {
+  const html = Object.entries(room.players || {}).map(([id, p]) =>
+    `<div class="score-item">${escapeHtml(p.name)}：<strong>${room.scores?.[id] ?? 0}</strong>分</div>`
+  ).join("");
+  document.getElementById("scoreBoard").innerHTML = html;
+}
+
+function renderPlayerButtons(room, r) {
+  const area = document.getElementById("playerButtons");
+  area.innerHTML = "";
+  Object.entries(room.players || {}).forEach(([id, p]) => {
+    const btn = document.createElement("button");
+    const role = id === r.guesserId ? "(猜)" : "(畫)";
+    btn.textContent = p.name + " " + role;
+    if (id === myId) btn.classList.add("active-player");
+    btn.disabled = true;
+    area.appendChild(btn);
+  });
+}
+
+function setupDrawingCanvas(r) {
+  const roundKey = r.number + "-" + r.startedAt;
+  if (drawnRoundKey === roundKey) return;
+  drawnRoundKey = roundKey;
+  drawingSubmittedLocal = false;
+  resetCanvas();
+  listenForDrawStrokes(roundKey);
+}
+
+function listenForDrawStrokes(roundKey) {
+  if (unsubDraw) unsubDraw();
+  const strokesRef = ref(db, `rooms/${roomId}/drawings`);
+  unsubDraw = onValue(strokesRef, (snap) => {
+    const data = snap.val() || {};
+    const key = Object.keys(data).sort().join(",");
+    if (key === lastRenderedKey) return;
+    lastRenderedKey = key;
+    resetCanvas();
+    Object.keys(data).sort().forEach(k => paintStroke(data[k]));
+  });
+}
+
+function paintStroke(s) {
+  if (!s) return;
+  ctx.beginPath();
+  ctx.lineWidth = s.size;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = s.color;
+  ctx.moveTo(s.x1, s.y1);
+  ctx.lineTo(s.x2, s.y2);
+  ctx.stroke();
+  ctx.beginPath();
+}
+
+window.clearCanvas = async function () {
+  resetCanvas();
+  if (roomRef) await remove(ref(db, `rooms/${roomId}/drawings`));
+};
+
+window.submitDrawing = async function () {
+  if (!roomRef || !currentRoundData) return;
+  if (drawingSubmittedLocal) return;
+  drawingSubmittedLocal = true;
+  const submittedAt = Date.now();
+  await update(roomRef, {
+    "currentRound/phase": "guess",
+    "currentRound/submittedAt": submittedAt
+  });
+};
+
+/* ============================================================
+   9. GUESSING
+   ============================================================ */
+window.checkAnswer = async function () {
+  if (!currentRoundData) return;
+  const guess = document.getElementById("guessInput").value.trim();
+  if (!guess) return alert("請先輸入答案！");
+  const r = currentRoundData;
+  const roomSnap = await get(roomRef);
+  const room = roomSnap.val();
+  const correct = guess === r.word;
+
+  const resultArea = document.getElementById("resultArea");
+  resultArea.classList.remove("hidden");
+  document.getElementById("guessArea").classList.add("hidden");
+
+  let resultHtml = "";
+  const updates = {};
+
+  if (correct) {
+    const elapsed = Math.max(1, Math.floor((Date.now() - r.startedAt) / 1000));
+    const points = Math.max(1, 11 - Math.floor(elapsed / 3));
+    updates[`scores/${r.guesserId}`] = (room.scores?.[r.guesserId] || 0) + 3;
+    (r.drawerIds || []).forEach(id => {
+      updates[`scores/${id}`] = (room.scores?.[id] || 0) + points;
+    });
+    resultHtml = `
+      <div class="winner-box">
+        <div style="font-size:1.8rem; color:#e67e22;">答對啦！</div>
+        <div style="font-size:1.3rem; margin:8px 0;">答案：${escapeHtml(r.word)}</div>
+        <div>用時：${elapsed} 秒</div>
+        <div>畫家各得 ${points} 分，猜題者得 3 分</div>
+      </div>`;
+  } else {
+    resultHtml = `<div style="color:#ff6b6b; font-size:1.4rem; margin:15px 0;">唔中！呢輪無人得分</div>`;
+  }
+
+  updates["currentRound/phase"] = "result";
+  updates["currentRound/result"] = { correct, guess, at: Date.now() };
+  await update(roomRef, updates);
+
+  resultArea.innerHTML = resultHtml;
+
+  if (isHost) {
+    document.getElementById("nextRoundBtn").classList.remove("hidden");
+  }
+};
+
+/* ============================================================
+   10. NEXT ROUND / FINAL
+   ============================================================ */
+window.nextRound = async function () {
+  if (!isHost || !roomRef) return;
+  const snap = await get(roomRef);
+  const room = snap.val();
+  const n = room.currentRound?.number || 1;
+  if (n >= totalRounds) {
+    await update(roomRef, { status: "finished" });
+  } else {
+    await beginRound(n + 1);
+  }
+};
+
+function renderResult(room, r) {
+  const resultArea = document.getElementById("resultArea");
+  resultArea.classList.remove("hidden");
+  const res = r.result;
+  if (!res) { resultArea.innerHTML = ""; return; }
+  if (res.correct) {
+    resultArea.innerHTML = `
+      <div class="winner-box">
+        <div style="font-size:1.8rem; color:#e67e22;">答對啦！</div>
+        <div style="font-size:1.3rem; margin:8px 0;">答案：${escapeHtml(r.word)}</div>
+      </div>`;
+  } else {
+    resultArea.innerHTML = `<div style="color:#ff6b6b; font-size:1.4rem; margin:15px 0;">唔中！呢輪無人得分</div>`;
+  }
+  if (isHost) document.getElementById("nextRoundBtn").classList.remove("hidden");
+  else document.getElementById("nextRoundBtn").classList.add("hidden");
+}
+
+function renderFinal(room) {
+  const sorted = Object.entries(room.scores || {}).sort((a, b) => b[1] - a[1]);
+  const nameOf = id => room.players?.[id]?.name || "?";
+  document.getElementById("finalScores").innerHTML = sorted.map(([id, s], i) =>
+    `<div style="margin:8px 0;">${i + 1}. ${escapeHtml(nameOf(id))}：<strong>${s}</strong> 分</div>`
+  ).join("");
+  
   if (sorted.length) {
     document.getElementById("winnerAnnounce").innerHTML = `
       🏆 優勝者係<br>
@@ -10,7 +679,7 @@
 }
 
 /* ============================================================
-   11. UI & CANVAS UTILITIES (Missing from your upload)
+   11. UI & CANVAS UTILITIES
    ============================================================ */
 function escapeHtml(str) {
   if (!str) return "";
@@ -32,9 +701,7 @@ window.leaveGame = function () {
   location.reload();
 };
 
-window.setSize = function (s) {
-  brushSize = s;
-};
+window.setSize = function (s) { brushSize = s; };
 
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
@@ -91,7 +758,6 @@ async function draw(e) {
   const pos = getPos(e);
   e.preventDefault();
 
-  // Draw locally
   ctx.beginPath();
   ctx.lineWidth = brushSize;
   ctx.lineCap = "round";
@@ -101,7 +767,6 @@ async function draw(e) {
   ctx.stroke();
   ctx.beginPath();
 
-  // Send stroke to Firebase (Throttled slightly for performance)
   const strokeData = {
     x1: lastX, y1: lastY, x2: pos.x, y2: pos.y,
     color: brushColor, size: brushSize
@@ -113,9 +778,7 @@ async function draw(e) {
   lastY = pos.y;
 }
 
-function stopDraw() {
-  painting = false;
-}
+function stopDraw() { painting = false; }
 
 canvas.addEventListener("mousedown", startDraw);
 canvas.addEventListener("mousemove", draw);
@@ -124,7 +787,6 @@ canvas.addEventListener("mouseout", stopDraw);
 canvas.addEventListener("touchstart", startDraw);
 canvas.addEventListener("touchmove", draw);
 canvas.addEventListener("touchend", stopDraw);
-
 </script>
 </body>
 </html>
